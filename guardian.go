@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cgrates/cgrates/utils"
+	"github.com/google/uuid"
 )
 
 // Guardian is the global package variable
@@ -86,7 +87,7 @@ func (gl *GuardianLocker) lockWithReference(refID string, timeout time.Duration,
 	var refEmpty bool
 	if refID == "" {
 		refEmpty = true
-		refID = utils.GenUUID()
+		refID = uuid.NewString()
 	}
 	gl.lockItem(refID) // make sure we only process one simultaneous refID at the time, otherwise checking already used refID is not reliable
 	gl.refsMux.Lock()

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cgrates/cgrates/utils"
+	"github.com/google/uuid"
 )
 
 func delayHandler(_ context.Context) error {
@@ -187,7 +188,7 @@ func TestGuardianGuardIDsConcurrent(t *testing.T) {
 	maxIter := 500
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
-	refID := utils.GenUUID()
+	refID := uuid.NewString()
 	for i := 0; i < maxIter; i++ {
 		sg.Add(1)
 		go func() {
@@ -217,7 +218,7 @@ func TestGuardianGuardIDsTimeoutConcurrent(t *testing.T) {
 	maxIter := 50
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
-	refID := utils.GenUUID()
+	refID := uuid.NewString()
 	for i := 0; i < maxIter; i++ {
 		sg.Add(1)
 		go func() {
