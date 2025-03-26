@@ -19,11 +19,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package guardian
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cgrates/birpc/context"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -142,7 +142,7 @@ func (gl *GuardianLocker) unlockWithReference(refID string) (lkIDs []string) {
 }
 
 // Guard executes the handler between locks
-func (gl *GuardianLocker) Guard(ctx *context.Context, handler func(*context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
+func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
 	for _, lockID := range lockIDs {
 		gl.lockItem(lockID)
 	}
