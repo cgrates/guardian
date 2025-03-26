@@ -19,13 +19,13 @@ package guardian
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
 	"github.com/google/uuid"
 )
 
@@ -308,42 +308,42 @@ func BenchmarkGuardIDs(b *testing.B) {
 
 func TestGuardianLockItemUnlockItem(t *testing.T) {
 	//for coverage purposes
-	itemID := utils.EmptyString
+	itemID := ""
 	Guardian.lockItem(itemID)
 	Guardian.unlockItem(itemID)
-	if itemID != utils.EmptyString {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.EmptyString, itemID)
+	if itemID != "" {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", itemID)
 	}
 }
 
 func TestGuardianLockUnlockWithReference(t *testing.T) {
 	//for coverage purposes
-	refID := utils.EmptyString
+	refID := ""
 	Guardian.lockWithReference(refID, 0, []string{}...)
 	Guardian.unlockWithReference(refID)
-	if refID != utils.EmptyString {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.EmptyString, refID)
+	if refID != "" {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", refID)
 	}
 }
 
 func TestGuardianGuardUnguardIDs(t *testing.T) {
 	//for coverage purposes
-	refID := utils.EmptyString
+	refID := ""
 	lkIDs := []string{"test1", "test2", "test3"}
 	Guardian.GuardIDs(refID, time.Second, lkIDs...)
 	Guardian.UnguardIDs(refID)
-	if refID != utils.EmptyString {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.EmptyString, refID)
+	if refID != "" {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", refID)
 	}
 }
 
 func TestGuardianGuardUnguardIDsCase2(t *testing.T) {
-	//for coverage purposes
+	mockErr := errors.New("mock_error")
 	lkIDs := []string{"test1", "test2", "test3"}
 	err := Guardian.Guard(context.TODO(), func(_ context.Context) error {
-		return utils.ErrNotFound
+		return mockErr
 	}, 10*time.Millisecond, lkIDs...)
-	if err == nil || err != utils.ErrNotFound {
-		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", utils.ErrNotFound, err)
+	if err == nil || err != mockErr {
+		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", mockErr, err)
 	}
 }
