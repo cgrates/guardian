@@ -24,14 +24,32 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cgrates/cgrates/utils"
 	"github.com/google/uuid"
 )
 
-// Guardian is the global package variable
-var Guardian = &GuardianLocker{
-	locks: make(map[string]*itemLock),
-	refs:  make(map[string]*refObj)}
+// Option configures a GuardianLocker.
+type Option func(*GuardianLocker)
+
+type logger interface {
+	Alert(string) error
+	Close() error
+	Crit(string) error
+	Debug(string) error
+	Emerg(string) error
+	Err(string) error
+	Info(string) error
+	Notice(string) error
+	Warning(string) error
+}
+
+// GuardianLocker is an optimized locking system per locking key
+type GuardianLocker struct {
+	lkMux   sync.Mutex // protects the locks
+	locks   map[string]*itemLock
+	refsMux sync.RWMutex       // protects the map
+	refs    map[string]*refObj // used in case of remote locks
+	logger  logger
+}
 
 type itemLock struct {
 	lk  chan struct{}
@@ -43,12 +61,72 @@ type refObj struct {
 	tm   *time.Timer
 }
 
-// GuardianLocker is an optimized locking system per locking key
-type GuardianLocker struct {
-	locks   map[string]*itemLock
-	lkMux   sync.Mutex         // protects the locks
-	refs    map[string]*refObj // used in case of remote locks
-	refsMux sync.RWMutex       // protects the map
+// Guardian is the global package variable
+var Guardian = New()
+
+// New creates a GuardianLocker with the provided options
+func New(opts ...Option) *GuardianLocker {
+	gl := &GuardianLocker{
+		locks:  make(map[string]*itemLock),
+		refs:   make(map[string]*refObj),
+		logger: nopLogger{},
+	}
+
+	for _, opt := range opts {
+		opt(gl)
+	}
+
+	return gl
+}
+
+// WithLogger sets a custom logger.
+func WithLogger(l logger) Option {
+	return func(gl *GuardianLocker) {
+		if l != nil {
+			gl.logger = l
+		}
+	}
+}
+
+// Guard executes the handler between locks
+func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
+	for _, lockID := range lockIDs {
+		gl.lockItem(lockID)
+	}
+	errChan := make(chan error, 1)
+	if timeout > 0 { // wait with timeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel() // stop the context at the end of function
+	}
+	go func() {
+		errChan <- handler(ctx)
+	}()
+
+	select {
+	case err = <-errChan:
+		close(errChan)
+	case <-ctx.Done(): // ignore context error but log it
+		gl.logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: <%+v> because: <%s> ", lockIDs, ctx.Err()))
+	}
+	for _, lockID := range lockIDs {
+		gl.unlockItem(lockID)
+	}
+	return
+}
+
+// GuardIDs aquires a lock for duration
+// returns the reference ID for the lock group aquired
+func (gl *GuardianLocker) GuardIDs(refID string, timeout time.Duration, lkIDs ...string) string {
+	return gl.lockWithReference(refID, timeout, lkIDs...)
+}
+
+// UnguardIDs attempts to unlock a set of locks based on their reference ID received on lock
+func (gl *GuardianLocker) UnguardIDs(refID string) []string {
+	if refID != "" {
+		return gl.unlockWithReference(refID)
+	}
+	return nil
 }
 
 func (gl *GuardianLocker) lockItem(itmID string) {
@@ -102,7 +180,7 @@ func (gl *GuardianLocker) lockWithReference(refID string, timeout time.Duration,
 	if timeout != 0 {
 		tm = time.AfterFunc(timeout, func() {
 			if lkIDs := gl.unlockWithReference(refID); len(lkIDs) != 0 {
-				utils.Logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: %+v", lkIDs))
+				gl.logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: %+v", lkIDs))
 			}
 		})
 	}
@@ -142,43 +220,14 @@ func (gl *GuardianLocker) unlockWithReference(refID string) (lkIDs []string) {
 	return
 }
 
-// Guard executes the handler between locks
-func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
-	for _, lockID := range lockIDs {
-		gl.lockItem(lockID)
-	}
-	errChan := make(chan error, 1)
-	if timeout > 0 { // wait with timeout
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel() // stop the context at the end of function
-	}
-	go func() {
-		errChan <- handler(ctx)
-	}()
+type nopLogger struct{}
 
-	select {
-	case err = <-errChan:
-		close(errChan)
-	case <-ctx.Done(): // ignore context error but log it
-		utils.Logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: <%+v> because: <%s> ", lockIDs, ctx.Err()))
-	}
-	for _, lockID := range lockIDs {
-		gl.unlockItem(lockID)
-	}
-	return
-}
-
-// GuardIDs aquires a lock for duration
-// returns the reference ID for the lock group aquired
-func (gl *GuardianLocker) GuardIDs(refID string, timeout time.Duration, lkIDs ...string) string {
-	return gl.lockWithReference(refID, timeout, lkIDs...)
-}
-
-// UnguardIDs attempts to unlock a set of locks based on their reference ID received on lock
-func (gl *GuardianLocker) UnguardIDs(refID string) []string {
-	if refID != "" {
-		return gl.unlockWithReference(refID)
-	}
-	return nil
-}
+func (nopLogger) Alert(string) error   { return nil }
+func (nopLogger) Close() error         { return nil }
+func (nopLogger) Crit(string) error    { return nil }
+func (nopLogger) Debug(string) error   { return nil }
+func (nopLogger) Emerg(string) error   { return nil }
+func (nopLogger) Err(string) error     { return nil }
+func (nopLogger) Info(string) error    { return nil }
+func (nopLogger) Notice(string) error  { return nil }
+func (nopLogger) Warning(string) error { return nil }
