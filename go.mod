@@ -2,7 +2,10 @@ module github.com/cgrates/guardian
 
 go 1.24.0
 
-require github.com/cgrates/cgrates v0.10.4
+require (
+	github.com/cgrates/cgrates v0.10.4
+	github.com/google/uuid v1.6.0
+)
 
 require (
 	github.com/cenkalti/hub v1.0.2 // indirect
