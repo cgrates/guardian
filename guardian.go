@@ -30,6 +30,7 @@ import (
 // Option configures a GuardianLocker.
 type Option func(*GuardianLocker)
 
+// logger defines the logging interface required.
 type logger interface {
 	Alert(string) error
 	Close() error
@@ -42,7 +43,7 @@ type logger interface {
 	Warning(string) error
 }
 
-// GuardianLocker is an optimized locking system per locking key
+// GuardianLocker is an optimized locking system that manages locks by string keys.
 type GuardianLocker struct {
 	lkMux   sync.Mutex // protects the locks
 	locks   map[string]*itemLock
@@ -51,20 +52,22 @@ type GuardianLocker struct {
 	logger  logger
 }
 
+// itemLock holds the channel used for locking and a counter for tracking lock references.
 type itemLock struct {
 	lk  chan struct{}
 	cnt int64
 }
 
+// refObj tracks a group of locks with an optional timer for auto-unlocking.
 type refObj struct {
 	refs []string
 	tm   *time.Timer
 }
 
-// Guardian is the global package variable
+// Guardian is the global package variable.
 var Guardian = New()
 
-// New creates a GuardianLocker with the provided options
+// New creates a GuardianLocker with the provided options.
 func New(opts ...Option) *GuardianLocker {
 	gl := &GuardianLocker{
 		locks:  make(map[string]*itemLock),
@@ -79,7 +82,7 @@ func New(opts ...Option) *GuardianLocker {
 	return gl
 }
 
-// WithLogger sets a custom logger.
+// WithLogger sets a custom logger for the GuardianLocker.
 func WithLogger(l logger) Option {
 	return func(gl *GuardianLocker) {
 		if l != nil {
@@ -88,16 +91,20 @@ func WithLogger(l logger) Option {
 	}
 }
 
-// Guard executes the handler between locks
-func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error, timeout time.Duration, lockIDs ...string) (err error) {
+// Guard locks the specified IDs, executes the handler, and then unlocks the IDs.
+// Returns the error from handler or nil if it times out/gets cancelled.
+func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error,
+	timeout time.Duration, lockIDs ...string) (err error) {
 	for _, lockID := range lockIDs {
 		gl.lockItem(lockID)
 	}
 	errChan := make(chan error, 1)
-	if timeout > 0 { // wait with timeout
+
+	// Apply timeout if specified.
+	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel() // stop the context at the end of function
+		defer cancel()
 	}
 	go func() {
 		errChan <- handler(ctx)
@@ -107,7 +114,8 @@ func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Contex
 	case err = <-errChan:
 		close(errChan)
 	case <-ctx.Done(): // ignore context error but log it
-		gl.logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: <%+v> because: <%s> ", lockIDs, ctx.Err()))
+		gl.logger.Warning(fmt.Sprintf(
+			"<Guardian> force timing-out locks: <%+v> because: <%s> ", lockIDs, ctx.Err()))
 	}
 	for _, lockID := range lockIDs {
 		gl.unlockItem(lockID)
@@ -115,13 +123,14 @@ func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Contex
 	return
 }
 
-// GuardIDs aquires a lock for duration
-// returns the reference ID for the lock group aquired
+// GuardIDs acquires a lock for the specified duration and returns the
+// reference ID for the lock group acquired.
 func (gl *GuardianLocker) GuardIDs(refID string, timeout time.Duration, lkIDs ...string) string {
 	return gl.lockWithReference(refID, timeout, lkIDs...)
 }
 
-// UnguardIDs attempts to unlock a set of locks based on their reference ID received on lock
+// UnguardIDs unlocks all locks associated with the given reference ID.
+// Returns the list of unlocked item IDs or nil if refID is empty.
 func (gl *GuardianLocker) UnguardIDs(refID string) []string {
 	if refID != "" {
 		return gl.unlockWithReference(refID)
@@ -129,6 +138,7 @@ func (gl *GuardianLocker) UnguardIDs(refID string) []string {
 	return nil
 }
 
+// lockItem acquires a lock for the given item ID.
 func (gl *GuardianLocker) lockItem(itmID string) {
 	if itmID == "" {
 		return
@@ -145,6 +155,7 @@ func (gl *GuardianLocker) lockItem(itmID string) {
 	<-itmLock.lk
 }
 
+// unlockItem releases a lock for the given item ID.
 func (gl *GuardianLocker) unlockItem(itmID string) {
 	gl.lkMux.Lock()
 	itmLock, exists := gl.locks[itmID]
@@ -160,24 +171,33 @@ func (gl *GuardianLocker) unlockItem(itmID string) {
 	itmLock.lk <- struct{}{}
 }
 
-// lockWithReference will perform locks and also generate a lock reference for it (so it can be used when remotely locking)
+// lockWithReference acquires locks for the given IDs and associates them with
+// a reference ID.
+// If refID is empty, it generates a new UUID. If timeout is positive, it
+// automatically unlocks after the timeout duration.
+// Returns the reference ID on success or empty string if the reference ID is
+// already in use.
 func (gl *GuardianLocker) lockWithReference(refID string, timeout time.Duration, lkIDs ...string) string {
 	var refEmpty bool
 	if refID == "" {
 		refEmpty = true
 		refID = uuid.NewString()
 	}
-	gl.lockItem(refID) // make sure we only process one simultaneous refID at the time, otherwise checking already used refID is not reliable
+
+	// Lock the refID first to ensure only one process can check or use it at a time.
+	gl.lockItem(refID)
+
 	gl.refsMux.Lock()
 	if !refEmpty {
 		if _, has := gl.refs[refID]; has {
 			gl.refsMux.Unlock()
 			gl.unlockItem(refID)
-			return "" // no locking was done
+			return "" // refID already in use, abort without locking
 		}
 	}
 	var tm *time.Timer
 	if timeout != 0 {
+		// Set up auto-unlock after timeout period.
 		tm = time.AfterFunc(timeout, func() {
 			if lkIDs := gl.unlockWithReference(refID); len(lkIDs) != 0 {
 				gl.logger.Warning(fmt.Sprintf("<Guardian> force timing-out locks: %+v", lkIDs))
@@ -197,7 +217,8 @@ func (gl *GuardianLocker) lockWithReference(refID string, timeout time.Duration,
 	return refID
 }
 
-// unlockWithReference will unlock based on the reference ID
+// unlockWithReference releases all locks associated with the given reference
+// ID and returns the unlocked item IDs.
 func (gl *GuardianLocker) unlockWithReference(refID string) (lkIDs []string) {
 	gl.lockItem(refID)
 	gl.refsMux.Lock()
