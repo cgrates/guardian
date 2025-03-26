@@ -40,7 +40,7 @@ func TestGuardianMultipleKeys(t *testing.T) {
 	maxIter := 5
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
-	for i := 0; i < maxIter; i++ {
+	for range maxIter {
 		for _, key := range keys {
 			sg.Add(1)
 			go func(key string) {
@@ -69,7 +69,7 @@ func TestGuardianTimeout(t *testing.T) {
 	maxIter := 5
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
-	for i := 0; i < maxIter; i++ {
+	for range maxIter {
 		for _, key := range keys {
 			sg.Add(1)
 			go func(key string) {
@@ -189,7 +189,7 @@ func TestGuardianGuardIDsConcurrent(t *testing.T) {
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
 	refID := uuid.NewString()
-	for i := 0; i < maxIter; i++ {
+	for range maxIter {
 		sg.Add(1)
 		go func() {
 			if retRefID := Guardian.GuardIDs(refID, 0, keys...); retRefID != "" {
@@ -219,7 +219,7 @@ func TestGuardianGuardIDsTimeoutConcurrent(t *testing.T) {
 	sg := new(sync.WaitGroup)
 	keys := []string{"test1", "test2", "test3"}
 	refID := uuid.NewString()
-	for i := 0; i < maxIter; i++ {
+	for range maxIter {
 		sg.Add(1)
 		go func() {
 			Guardian.GuardIDs(refID, time.Microsecond, keys...)
