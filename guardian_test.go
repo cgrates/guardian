@@ -36,232 +36,223 @@ func delayHandler(_ context.Context) error {
 
 // Forks 3 groups of workers and makes sure that the time for execution is the one we expect for all 15 goroutines (with 100ms )
 func TestGuardianMultipleKeys(t *testing.T) {
+	gl := New()
 	tStart := time.Now()
 	maxIter := 5
-	sg := new(sync.WaitGroup)
+	var wg sync.WaitGroup
 	keys := []string{"test1", "test2", "test3"}
 	for range maxIter {
 		for _, key := range keys {
-			sg.Add(1)
+			wg.Add(1)
 			go func(key string) {
-				Guardian.Guard(context.TODO(), delayHandler, 0, key)
-				sg.Done()
+				gl.Guard(context.TODO(), delayHandler, 0, key)
+				wg.Done()
 			}(key)
 		}
 	}
-	sg.Wait()
+	wg.Wait()
 	mustExecDur := time.Duration(maxIter*100) * time.Millisecond
 	if execTime := time.Since(tStart); execTime < mustExecDur ||
 		execTime > mustExecDur+100*time.Millisecond {
 		t.Errorf("Execution took: %v", execTime)
 	}
-	Guardian.lkMux.Lock()
 	for _, key := range keys {
-		if _, hasKey := Guardian.locks[key]; hasKey {
+		if _, hasKey := gl.locks[key]; hasKey {
 			t.Errorf("Possible memleak for key: %s", key)
 		}
 	}
-	Guardian.lkMux.Unlock()
 }
 
 func TestGuardianTimeout(t *testing.T) {
+	gl := New()
 	tStart := time.Now()
 	maxIter := 5
-	sg := new(sync.WaitGroup)
+	var wg sync.WaitGroup
 	keys := []string{"test1", "test2", "test3"}
 	for range maxIter {
 		for _, key := range keys {
-			sg.Add(1)
+			wg.Add(1)
 			go func(key string) {
-				Guardian.Guard(context.TODO(), delayHandler, 10*time.Millisecond, key)
-				sg.Done()
+				gl.Guard(context.TODO(), delayHandler, 10*time.Millisecond, key)
+				wg.Done()
 			}(key)
 		}
 	}
-	sg.Wait()
+	wg.Wait()
 	mustExecDur := time.Duration(maxIter*10) * time.Millisecond
 	if execTime := time.Since(tStart); execTime < mustExecDur ||
 		execTime > mustExecDur+100*time.Millisecond {
 		t.Errorf("Execution took: %v", execTime)
 	}
-	Guardian.lkMux.Lock()
 	for _, key := range keys {
-		if _, hasKey := Guardian.locks[key]; hasKey {
+		if _, hasKey := gl.locks[key]; hasKey {
 			t.Error("Possible memleak")
 		}
 	}
-	Guardian.lkMux.Unlock()
 }
 
 func TestGuardianGuardIDs(t *testing.T) {
+	gl := New()
 
 	//lock with 3 keys
 	lockIDs := []string{"test1", "test2", "test3"}
-	// make sure the keys are not in guardian before lock
-	Guardian.lkMux.Lock()
-	for _, lockID := range lockIDs {
-		if _, hasKey := Guardian.locks[lockID]; hasKey {
-			t.Errorf("Unexpected lockID found: %s", lockID)
-		}
-	}
-	Guardian.lkMux.Unlock()
+
 	// lock 3 items
 	tStart := time.Now()
 	lockDur := 2 * time.Millisecond
-	Guardian.GuardIDs("", lockDur, lockIDs...)
-	Guardian.lkMux.Lock()
+	gl.GuardIDs("", lockDur, lockIDs...)
 	for _, lockID := range lockIDs {
-		if itmLock, hasKey := Guardian.locks[lockID]; !hasKey {
+		if itmLock, hasKey := gl.locks[lockID]; !hasKey {
 			t.Errorf("Cannot find lock for lockID: %s", lockID)
 		} else if itmLock.cnt != 1 {
 			t.Errorf("Unexpected itmLock found: %+v", itmLock)
 		}
 	}
-	Guardian.lkMux.Unlock()
 	secLockDur := time.Millisecond
 	// second lock to test counter
-	go Guardian.GuardIDs("", secLockDur, lockIDs[1:]...)
-	time.Sleep(30 * time.Microsecond) // give time for goroutine to lock
+	go gl.GuardIDs("", secLockDur, lockIDs[1:]...)
+	time.Sleep(time.Millisecond) // give time for goroutine to lock
 	// check if counters were properly increased
-	Guardian.lkMux.Lock()
+	gl.lkMux.Lock()
 	lkID := lockIDs[0]
 	eCnt := int64(1)
-	if itmLock, hasKey := Guardian.locks[lkID]; !hasKey {
+	if itmLock, hasKey := gl.locks[lkID]; !hasKey {
 		t.Errorf("Cannot find lock for lockID: %s", lkID)
 	} else if itmLock.cnt != eCnt {
-		t.Errorf("Unexpected counter: %d for itmLock with id %s", itmLock.cnt, lkID)
+		t.Errorf("itemLock %q counter=%d, want %d", lkID, itmLock.cnt, eCnt)
 	}
 	lkID = lockIDs[1]
 	eCnt = int64(2)
-	if itmLock, hasKey := Guardian.locks[lkID]; !hasKey {
+	if itmLock, hasKey := gl.locks[lkID]; !hasKey {
 		t.Errorf("Cannot find lock for lockID: %s", lkID)
 	} else if itmLock.cnt != eCnt {
-		t.Errorf("Unexpected counter: %d for itmLock with id %s", itmLock.cnt, lkID)
+		t.Errorf("itemLock %q counter=%d, want %d", lkID, itmLock.cnt, eCnt)
 	}
 	lkID = lockIDs[2]
 	eCnt = int64(1) // we did not manage to increase it yet since it did not pass first lock
-	if itmLock, hasKey := Guardian.locks[lkID]; !hasKey {
+	if itmLock, hasKey := gl.locks[lkID]; !hasKey {
 		t.Errorf("Cannot find lock for lockID: %s", lkID)
 	} else if itmLock.cnt != eCnt {
-		t.Errorf("Unexpected counter: %d for itmLock with id %s", itmLock.cnt, lkID)
+		t.Errorf("itemLock %q counter=%d, want %d", lkID, itmLock.cnt, eCnt)
 	}
-	Guardian.lkMux.Unlock()
+	gl.lkMux.Unlock()
 	time.Sleep(lockDur + secLockDur + 50*time.Millisecond) // give time to unlock before proceeding
 
 	// make sure all counters were removed
+	gl.lkMux.Lock()
 	for _, lockID := range lockIDs {
-		if _, hasKey := Guardian.locks[lockID]; hasKey {
+		if _, hasKey := gl.locks[lockID]; hasKey {
 			t.Errorf("Unexpected lockID found: %s", lockID)
 		}
 	}
+	gl.lkMux.Unlock()
+
 	// test lock  without timer
-	refID := Guardian.GuardIDs("", 0, lockIDs...)
+	refID := gl.GuardIDs("", 0, lockIDs...)
 
 	if totalLockDur := time.Since(tStart); totalLockDur < lockDur {
 		t.Errorf("Lock duration too small")
 	}
 	time.Sleep(30 * time.Millisecond)
 	// making sure the items stay locked
-	Guardian.lkMux.Lock()
-	if len(Guardian.locks) != 3 {
-		t.Errorf("locks should have 3 elements, have: %+v", Guardian.locks)
+	gl.lkMux.Lock()
+	if len(gl.locks) != 3 {
+		t.Errorf("locks should have 3 elements, have: %+v", gl.locks)
 	}
 	for _, lkID := range lockIDs {
-		if itmLock, hasKey := Guardian.locks[lkID]; !hasKey {
+		if itmLock, hasKey := gl.locks[lkID]; !hasKey {
 			t.Errorf("Cannot find lock for lockID: %s", lkID)
 		} else if itmLock.cnt != 1 {
-			t.Errorf("Unexpected counter: %d for itmLock with id %s", itmLock.cnt, lkID)
+			t.Errorf("itemLock %q counter=%d, want %d", lkID, itmLock.cnt, 1)
 		}
 	}
-	Guardian.lkMux.Unlock()
-	Guardian.UnguardIDs(refID)
+	gl.lkMux.Unlock()
+	gl.UnguardIDs(refID)
 	// make sure items were unlocked
-	Guardian.lkMux.Lock()
-	if len(Guardian.locks) != 0 {
-		t.Errorf("locks should have 0 elements, has: %+v", Guardian.locks)
+	gl.lkMux.Lock()
+	if len(gl.locks) != 0 {
+		t.Errorf("locks should have 0 elements, has: %+v", gl.locks)
 	}
-	Guardian.lkMux.Unlock()
+	gl.lkMux.Unlock()
 }
 
 // TestGuardianGuardIDsConcurrent executes GuardIDs concurrently
 func TestGuardianGuardIDsConcurrent(t *testing.T) {
+	gl := New()
 	maxIter := 500
-	sg := new(sync.WaitGroup)
+	var wg sync.WaitGroup
 	keys := []string{"test1", "test2", "test3"}
 	refID := uuid.NewString()
 	for range maxIter {
-		sg.Add(1)
+		wg.Add(1)
 		go func() {
-			if retRefID := Guardian.GuardIDs(refID, 0, keys...); retRefID != "" {
-				if lkIDs := Guardian.UnguardIDs(refID); !reflect.DeepEqual(keys, lkIDs) {
+			if retRefID := gl.GuardIDs(refID, 0, keys...); retRefID != "" {
+				if lkIDs := gl.UnguardIDs(refID); !reflect.DeepEqual(keys, lkIDs) {
 					t.Errorf("expecting: %+v, received: %+v", keys, lkIDs)
 				}
 			}
-			sg.Done()
+			wg.Done()
 		}()
 	}
-	sg.Wait()
-
-	Guardian.lkMux.Lock()
-	if len(Guardian.locks) != 0 {
-		t.Errorf("Possible memleak for locks: %+v", Guardian.locks)
+	wg.Wait()
+	if len(gl.locks) != 0 {
+		t.Errorf("Possible memleak for locks: %+v", gl.locks)
 	}
-	Guardian.lkMux.Unlock()
-	Guardian.refsMux.Lock()
-	if len(Guardian.refs) != 0 {
-		t.Errorf("Possible memleak for refs: %+v", Guardian.refs)
+	if len(gl.refs) != 0 {
+		t.Errorf("Possible memleak for refs: %+v", gl.refs)
 	}
-	Guardian.refsMux.Unlock()
 }
 
 func TestGuardianGuardIDsTimeoutConcurrent(t *testing.T) {
+	gl := New()
 	maxIter := 50
-	sg := new(sync.WaitGroup)
+	var wg sync.WaitGroup
 	keys := []string{"test1", "test2", "test3"}
 	refID := uuid.NewString()
 	for range maxIter {
-		sg.Add(1)
+		wg.Add(1)
 		go func() {
-			Guardian.GuardIDs(refID, time.Microsecond, keys...)
-			sg.Done()
+			gl.GuardIDs(refID, time.Microsecond, keys...)
+			wg.Done()
 		}()
 	}
-	sg.Wait()
+	wg.Wait()
 	time.Sleep(10 * time.Millisecond)
-	Guardian.lkMux.Lock()
-	if len(Guardian.locks) != 0 {
-		t.Errorf("Possible memleak for locks: %+v", Guardian.locks)
+	gl.lkMux.Lock()
+	if len(gl.locks) != 0 {
+		t.Errorf("Possible memleak for locks: %+v", gl.locks)
 	}
-	Guardian.lkMux.Unlock()
-	Guardian.refsMux.Lock()
-	if len(Guardian.refs) != 0 {
-		t.Errorf("Possible memleak for refs: %+v", Guardian.refs)
+	gl.lkMux.Unlock()
+	gl.refsMux.Lock()
+	if len(gl.refs) != 0 {
+		t.Errorf("Possible memleak for refs: %+v", gl.refs)
 	}
-	Guardian.refsMux.Unlock()
+	gl.refsMux.Unlock()
 }
 
 // BenchmarkGuard-8      	  200000	     13759 ns/op
 func BenchmarkGuard(b *testing.B) {
+	gl := New()
 	var wg sync.WaitGroup
 	for b.Loop() {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			Guardian.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "1")
 		}()
 		go func() {
 			defer wg.Done()
-			Guardian.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "2")
 		}()
 		go func() {
 			defer wg.Done()
-			Guardian.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "1")
@@ -272,13 +263,14 @@ func BenchmarkGuard(b *testing.B) {
 
 // BenchmarkGuardian-8   	 1000000	      5794 ns/op
 func BenchmarkGuardian(b *testing.B) {
+	gl := New()
 	var wg sync.WaitGroup
 	var i int // used as lockID
 	for b.Loop() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			Guardian.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, strconv.Itoa(i))
@@ -290,15 +282,16 @@ func BenchmarkGuardian(b *testing.B) {
 
 // BenchmarkGuardIDs-8   	 1000000	      8732 ns/op
 func BenchmarkGuardIDs(b *testing.B) {
+	gl := New()
 	var wg sync.WaitGroup
 	var i int // used as lockID
 	for b.Loop() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if refID := Guardian.GuardIDs("", 0, strconv.Itoa(i)); refID != "" {
+			if refID := gl.GuardIDs("", 0, strconv.Itoa(i)); refID != "" {
 				time.Sleep(time.Microsecond)
-				Guardian.UnguardIDs(refID)
+				gl.UnguardIDs(refID)
 			}
 		}()
 		i++
@@ -307,40 +300,41 @@ func BenchmarkGuardIDs(b *testing.B) {
 }
 
 func TestGuardianLockItemUnlockItem(t *testing.T) {
-	//for coverage purposes
+	gl := New()
 	itemID := ""
-	Guardian.lockItem(itemID)
-	Guardian.unlockItem(itemID)
+	gl.lockItem(itemID)
+	gl.unlockItem(itemID)
 	if itemID != "" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", itemID)
 	}
 }
 
 func TestGuardianLockUnlockWithReference(t *testing.T) {
-	//for coverage purposes
+	gl := New()
 	refID := ""
-	Guardian.lockWithReference(refID, 0, []string{}...)
-	Guardian.unlockWithReference(refID)
+	gl.lockWithReference(refID, 0, []string{}...)
+	gl.unlockWithReference(refID)
 	if refID != "" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", refID)
 	}
 }
 
 func TestGuardianGuardUnguardIDs(t *testing.T) {
-	//for coverage purposes
+	gl := New()
 	refID := ""
 	lkIDs := []string{"test1", "test2", "test3"}
-	Guardian.GuardIDs(refID, time.Second, lkIDs...)
-	Guardian.UnguardIDs(refID)
+	gl.GuardIDs(refID, time.Second, lkIDs...)
+	gl.UnguardIDs(refID)
 	if refID != "" {
 		t.Errorf("\nExpected <%+v>, \nReceived <%+v>", "", refID)
 	}
 }
 
 func TestGuardianGuardUnguardIDsCase2(t *testing.T) {
+	gl := New()
 	mockErr := errors.New("mock_error")
 	lkIDs := []string{"test1", "test2", "test3"}
-	err := Guardian.Guard(context.TODO(), func(_ context.Context) error {
+	err := gl.Guard(context.TODO(), func(_ context.Context) error {
 		return mockErr
 	}, 10*time.Millisecond, lkIDs...)
 	if err == nil || err != mockErr {
