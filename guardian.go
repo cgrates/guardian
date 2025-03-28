@@ -19,11 +19,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package guardian
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/cgrates/birpc/context"
 	"github.com/google/uuid"
 )
 
@@ -93,7 +93,7 @@ func WithLogger(l logger) Option {
 
 // Guard locks the specified IDs, executes the handler, and then unlocks the IDs.
 // Returns the error from handler or nil if it times out/gets cancelled.
-func (gl *GuardianLocker) Guard(ctx context.Context, handler func(context.Context) error,
+func (gl *GuardianLocker) Guard(ctx *context.Context, handler func(*context.Context) error,
 	timeout time.Duration, lockIDs ...string) (err error) {
 	for _, lockID := range lockIDs {
 		gl.lockItem(lockID)
