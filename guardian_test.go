@@ -18,7 +18,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package guardian
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"strconv"
@@ -26,10 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cgrates/birpc/context"
 	"github.com/google/uuid"
 )
 
-func delayHandler(_ context.Context) error {
+func delayHandler(_ *context.Context) error {
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
@@ -238,21 +238,21 @@ func BenchmarkGuard(b *testing.B) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			gl.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(*context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "1")
 		}()
 		go func() {
 			defer wg.Done()
-			gl.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(*context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "2")
 		}()
 		go func() {
 			defer wg.Done()
-			gl.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(*context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, "1")
@@ -270,7 +270,7 @@ func BenchmarkGuardian(b *testing.B) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gl.Guard(context.TODO(), func(context.Context) error {
+			gl.Guard(context.TODO(), func(*context.Context) error {
 				time.Sleep(time.Microsecond)
 				return nil
 			}, 0, strconv.Itoa(i))
@@ -334,7 +334,7 @@ func TestGuardianGuardUnguardIDsCase2(t *testing.T) {
 	gl := New()
 	mockErr := errors.New("mock_error")
 	lkIDs := []string{"test1", "test2", "test3"}
-	err := gl.Guard(context.TODO(), func(_ context.Context) error {
+	err := gl.Guard(context.TODO(), func(_ *context.Context) error {
 		return mockErr
 	}, 10*time.Millisecond, lkIDs...)
 	if err == nil || err != mockErr {
