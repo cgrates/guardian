@@ -1,4 +1,4 @@
-// Copyright (C) ITsysCOM GmbH
+// Copyright ITsysCOM GmbH
 // SPDX-License-Identifier: MIT
 
 package guardian
