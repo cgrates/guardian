@@ -4,12 +4,11 @@
 package guardian
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
-
-	"github.com/cgrates/birpc/context"
 )
 
 // Option configures a Locker.
@@ -91,7 +90,7 @@ func (l *Locker) Lock(keys ...string) func() {
 // Guard runs handler while holding keys.
 // On timeout or cancellation, it unlocks and returns nil while handler may
 // still run.
-func (l *Locker) Guard(ctx *context.Context, handler func(*context.Context) error,
+func (l *Locker) Guard(ctx context.Context, handler func(context.Context) error,
 	keys ...string) error {
 	if len(keys) == 1 {
 		key := keys[0]
