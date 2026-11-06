@@ -4,12 +4,11 @@
 package guardian
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/cgrates/birpc/context"
 )
 
 type warningLogger struct {
@@ -47,7 +46,7 @@ func waitFor(t *testing.T, d time.Duration, label string, ready func() bool) {
 	}
 }
 
-func noopHandler(*context.Context) error { return nil }
+func noopHandler(context.Context) error { return nil }
 
 func TestLockBlocksSameKey(t *testing.T) {
 	locker := New()
@@ -183,7 +182,7 @@ func TestLockTimeoutUnlocksKey(t *testing.T) {
 func TestGuardHandlerError(t *testing.T) {
 	locker := New()
 	mockErr := errors.New("mock error")
-	err := locker.Guard(context.TODO(), func(*context.Context) error {
+	err := locker.Guard(context.TODO(), func(context.Context) error {
 		return mockErr
 	}, "b", "a", "b")
 	if !errors.Is(err, mockErr) {
@@ -201,7 +200,7 @@ func TestGuardTimeoutReleasesLock(t *testing.T) {
 	handlerDone := make(chan struct{})
 	guardDone := make(chan error, 1)
 	go func() {
-		guardDone <- locker.Guard(context.TODO(), func(*context.Context) error {
+		guardDone <- locker.Guard(context.TODO(), func(context.Context) error {
 			close(started)
 			<-release
 			close(handlerDone)
